@@ -5,6 +5,7 @@
   "main": "src/index.ts",
   "type": "module",
   "keywords": ["pi-package"],
+  "files": ["src", "README.md", "CHANGELOG.md"],
   "pi": {
     "extensions": ["./src/index.ts"]
   },
