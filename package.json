@@ -1,0 +1,14 @@
+{
+  "name": "pi-clearthen",
+  "version": "0.1.0",
+  "description": "Clear context and run a prompt in a fresh session",
+  "main": "src/index.ts",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.69.0"
+  }
+}
