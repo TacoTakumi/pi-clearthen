@@ -17,11 +17,17 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { parseFrontmatter, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { parseArgs } from "./args.ts";
-import { DEFAULT_TURN_BUDGET, interpretConfig, type ClearthenConfig } from "./config.ts";
+import {
+  DEFAULT_RESERVE_TOKENS,
+  DEFAULT_TURN_BUDGET,
+  exceedsHeadroom,
+  interpretConfig,
+  type ClearthenConfig,
+} from "./config.ts";
 
 export const DEFAULT_HANDOFF_PATH = "docs/clearthen-handoff.md";
 
@@ -38,9 +44,24 @@ export interface ArmState {
 // Module-level so it survives the replacement session: pi caches the extension
 // module for the same cwd and re-runs only the factory.
 let armed: ArmState | null = null;
+// True only between our handler deciding to arm and the replacement session's
+// session_start, so that start is distinguished from a plain /new.
+let handoffPending = false;
 
 export function getArmState(): ArmState | null {
   return armed;
+}
+
+function footerText(state: ArmState | null): string | undefined {
+  return state ? `clearthen armed ${state.contextLimit}` : undefined;
+}
+
+function compactionReserveTokens(cwd: string): number {
+  try {
+    return SettingsManager.create(cwd).getCompactionReserveTokens();
+  } catch {
+    return DEFAULT_RESERVE_TOKENS;
+  }
 }
 
 interface LoadedCommand {
@@ -114,6 +135,17 @@ function loadCommand(
 }
 
 export default function (pi: ExtensionAPI) {
+  // Re-apply the footer in the replacement session; any other new or resumed
+  // session (for example /new) disarms.
+  pi.on("session_start", async (event, ctx) => {
+    if (handoffPending) {
+      handoffPending = false;
+    } else if (event.reason === "new" || event.reason === "resume" || event.reason === "fork") {
+      armed = null;
+    }
+    ctx.ui.setStatus("clearthen", footerText(armed));
+  });
+
   // Register a tool so the agent can call it programmatically.
   // The tool queues the /clearthen command as a follow-up message;
   // pi handles the session switch and prompt delivery.
@@ -162,11 +194,20 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("clearthen: the document has no body to send as the prompt", "warning");
         return;
       }
-      for (const warning of loaded.warnings) ctx.ui.notify(warning, "warning");
+      const { prompt, arm, warnings } = loaded;
+      if (arm) {
+        const reserve = compactionReserveTokens(ctx.cwd);
+        if (exceedsHeadroom(arm.contextLimit, ctx.model.contextWindow, reserve)) {
+          warnings.push(
+            `clearthen: boundary ${arm.contextLimit} is inside the compaction reserve ` +
+              `(${reserve} of ${ctx.model.contextWindow} tokens); pi will compact before the boundary is reached`,
+          );
+        }
+      }
 
       // Plain use disarms; an armed load replaces whatever was armed before.
-      armed = loaded.arm;
-      const { prompt, arm } = loaded;
+      armed = arm;
+      handoffPending = true;
 
       // Wait for any in-progress work to settle before switching sessions
       await ctx.waitForIdle();
@@ -176,7 +217,7 @@ export default function (pi: ExtensionAPI) {
       const result = await ctx.newSession({
         parentSession,
         withSession: async (replacementCtx) => {
-          replacementCtx.ui.setStatus("clearthen", arm ? `clearthen armed ${arm.contextLimit}` : undefined);
+          for (const warning of warnings) replacementCtx.ui.notify(warning, "warning");
           replacementCtx.ui.notify(
             arm ? `Context cleared. Handoff armed at ${arm.contextLimit} tokens.` : "Context cleared. Running prompt...",
             "info",
@@ -184,6 +225,7 @@ export default function (pi: ExtensionAPI) {
           await replacementCtx.sendUserMessage(prompt);
         },
       });
+      handoffPending = false;
 
       if (result?.cancelled) {
         ctx.ui.notify("New session cancelled", "info");
