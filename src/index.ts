@@ -24,7 +24,7 @@ import { Type } from "typebox";
 import { DEFAULT_RESERVE_TOKENS, exceedsHeadroom } from "./config.ts";
 import { initialHopState, stepHop, type HopState } from "./hop-state.ts";
 import { DEFAULT_HANDOFF_PATH, loadCommand } from "./load.ts";
-import { ARM_ENTRY_TYPE, restoreArmState, rootUserMessageId, type ArmState } from "./session-state.ts";
+import { ARM_ENTRY_TYPE, clearTarget, restoreArmState, type ArmState } from "./session-state.ts";
 import { buildPreamble, buildSteer } from "./steer.ts";
 
 export { DEFAULT_HANDOFF_PATH, loadCommand } from "./load.ts";
@@ -238,15 +238,19 @@ export default function (pi: ExtensionAPI) {
         // Clear in place: the root user message becomes the target, which makes
         // the leaf an empty conversation in the same session file. The old hop
         // stays as a sibling branch under /tree.
-        const root = rootUserMessageId(ctx.sessionManager);
-        if (root) {
-          const result = await ctx.navigateTree(root, { summarize: false });
+        const where = clearTarget(ctx.sessionManager);
+        if (where.kind === "navigate") {
+          const result = await ctx.navigateTree(where.target, { summarize: false });
           if (result.cancelled) {
             ctx.ui.notify("clearthen: clear cancelled by another extension; nothing sent", "warning");
             return;
           }
           // pi puts the root prompt back in the editor on navigation.
           ctx.ui.setEditorText("");
+        } else if (where.kind === "stuck") {
+          warnings.push(
+            "clearthen: nothing was cleared; the conversation holds only its first prompt with no reply and pi cannot navigate above it",
+          );
         }
 
         // Plain use disarms; an armed load replaces whatever was armed before
@@ -257,10 +261,12 @@ export default function (pi: ExtensionAPI) {
         pi.appendEntry(ARM_ENTRY_TYPE, arm);
         ctx.ui.setStatus("clearthen", footerText(armed, hopState));
         for (const warning of warnings) ctx.ui.notify(warning, "warning");
-        ctx.ui.notify(
-          arm ? `Context cleared. Handoff armed at ${arm.contextLimit} tokens.` : "Context cleared. Running prompt...",
-          "info",
-        );
+        if (where.kind !== "stuck") {
+          ctx.ui.notify(
+            arm ? `Context cleared. Handoff armed at ${arm.contextLimit} tokens.` : "Context cleared. Running prompt...",
+            "info",
+          );
+        }
         pi.sendUserMessage(prompt);
       } finally {
         clearInFlight = false;

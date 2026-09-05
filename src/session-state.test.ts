@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ARM_ENTRY_TYPE, restoreArmState, rootUserMessageId, type ArmState } from "./session-state.ts";
+import { ARM_ENTRY_TYPE, clearTarget, restoreArmState, rootUserMessageId, type ArmState } from "./session-state.ts";
 
 const arm: ArmState = {
   path: "docs/clearthen-handoff.md",
@@ -59,4 +59,26 @@ test("rootUserMessageId is null with no user message", () => {
   const model = entry({ type: "model_change", parentId: null });
   assert.equal(rootUserMessageId(manager([model], model.id)), null);
   assert.equal(rootUserMessageId(manager([], null)), null);
+});
+
+test("clearTarget navigates to the root user message when a reply exists", () => {
+  const u1 = entry({ type: "message", parentId: null, message: { role: "user", content: "a" } });
+  const a1 = entry({ type: "message", parentId: u1.id, message: { role: "assistant", content: "b" } });
+  assert.deepEqual(clearTarget(manager([u1, a1], a1.id)), { kind: "navigate", target: u1.id });
+});
+
+test("clearTarget uses the parent when the root prompt is the leaf", () => {
+  const model = entry({ type: "model_change", parentId: null });
+  const u1 = entry({ type: "message", parentId: model.id, message: { role: "user", content: "a" } });
+  assert.deepEqual(clearTarget(manager([model, u1], u1.id)), { kind: "navigate", target: model.id });
+});
+
+test("clearTarget is stuck when the root prompt is the leaf and has no parent", () => {
+  const u1 = entry({ type: "message", parentId: null, message: { role: "user", content: "a" } });
+  assert.deepEqual(clearTarget(manager([u1], u1.id)), { kind: "stuck" });
+});
+
+test("clearTarget is empty with no user message", () => {
+  const model = entry({ type: "model_change", parentId: null });
+  assert.deepEqual(clearTarget(manager([model], model.id)), { kind: "empty" });
 });

@@ -40,6 +40,27 @@ export function rootUserMessageId(sm: Pick<SessionManager, "getLeafId" | "getEnt
   return root;
 }
 
+export type ClearTarget =
+  /** Navigate the tree to this entry to empty the conversation. */
+  | { kind: "navigate"; target: string }
+  /** The conversation is already empty; nothing to navigate. */
+  | { kind: "empty" }
+  /** The only entry on the branch is the root prompt itself with no parent: pi cannot clear it. */
+  | { kind: "stuck" };
+
+/**
+ * Where the clear should navigate. pi treats navigating to the current leaf
+ * as a no-op, so when the root user message is the leaf (prompt persisted,
+ * no reply yet) the target is its parent entry instead.
+ */
+export function clearTarget(sm: Pick<SessionManager, "getLeafId" | "getEntry">): ClearTarget {
+  const root = rootUserMessageId(sm);
+  if (!root) return { kind: "empty" };
+  if (root !== sm.getLeafId()) return { kind: "navigate", target: root };
+  const parent = sm.getEntry(root)?.parentId ?? null;
+  return parent ? { kind: "navigate", target: parent } : { kind: "stuck" };
+}
+
 export interface RestoredArm {
   /** Null when the branch carries no arm entry or its latest one is a disarm. */
   arm: ArmState | null;
