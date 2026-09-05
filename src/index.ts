@@ -1,8 +1,10 @@
 /**
- * clearthen — clear context and run a prompt in a fresh session
+ * clearthen — clear context and run a prompt, in the same session
  *
  * Instead of compacting (lossy) or handoff (AI-generated, review step),
- * this simply starts a new session and sends your prompt immediately.
+ * this navigates the session tree back to its root, which empties the
+ * conversation while keeping the old branch in the file, and sends your
+ * prompt immediately.
  *
  * Usage:
  *   /clearthen implement the login flow
@@ -245,10 +247,10 @@ export default function (pi: ExtensionAPI) {
     name: "clearthen",
     label: "Clear Then",
     description:
-      "Clear the conversation context and run a prompt in a fresh session. " +
+      "Clear the conversation context and run a prompt. " +
       "Use when the user wants to start a new focused task without the current " +
-      "conversation history. The prompt is sent immediately in the new session.",
-    promptSnippet: "clearthen — clear context and run a prompt in a fresh session",
+      "conversation history. The prompt is sent immediately once the context is cleared.",
+    promptSnippet: "clearthen — clear context and run a prompt",
     promptGuidelines: [
       "Use clearthen when the user explicitly asks to clear context and start a new task, or when continuing the current conversation would be counterproductive.",
       "Do NOT use clearthen for simple topic changes — only when the user wants a clean slate.",
@@ -266,7 +268,7 @@ export default function (pi: ExtensionAPI) {
           {
             type: "text",
             text: `Queued /clearthen with prompt: "${params.prompt}". ` +
-              `The session will clear and the prompt will run in a fresh session.`,
+              `The context will clear and the prompt will run next.`,
           },
         ],
       };
@@ -275,7 +277,7 @@ export default function (pi: ExtensionAPI) {
 
   // Slash command for human use
   pi.registerCommand("clearthen", {
-    description: "Clear context and run a prompt in a fresh session; prefix a token boundary or pass a handoff .md to arm",
+    description: "Clear context and run a prompt; prefix a token boundary or pass a handoff .md to arm",
     handler: async (args, ctx) => {
       const loaded = loadCommand(args, ctx.cwd, ctx.model.contextWindow);
       if (!loaded) {
