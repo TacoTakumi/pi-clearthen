@@ -37,9 +37,13 @@ export type { ArmState } from "./session-state.ts";
 let armed: ArmState | null = null;
 // Per-hop watch state; re-created whenever the mode arms and dropped on disarm.
 let hopState: HopState | null = null;
-// True from the clearthen tool queuing its command until the handler runs (or
-// the run settles): those turns must not count toward the budget, since an
-// abort would discard the queued command.
+// True from the clearthen tool sending its command until the run settles.
+// pi 0.84.4 executes an extension command at once, even mid-run, so the
+// handler is already parked at waitForIdle by the time the tool returns;
+// turns in that window must not count toward the budget, because an abort
+// would let the parked handler resume while agent_settled sends the
+// re-prompt, interleaving the two. Kept alongside clearInFlight in case a
+// later pi queues the command instead.
 let clearQueued = false;
 // Steer text to resend as a plain prompt once the aborted run has settled.
 let pendingReprompt: string | null = null;
@@ -138,8 +142,8 @@ export default function (pi: ExtensionAPI) {
   // Fallback ladder, second half: the aborted run has settled, so the identical
   // instruction now goes out as a normal prompt.
   pi.on("agent_settled", async () => {
-    // A queued clear dispatches as the run ends; if we are still here, either
-    // the handler already reset this or the dispatch did not happen.
+    // The parked handler proceeds once the run is idle; if we are still here
+    // either it already reset this or the command never reached the handler.
     clearQueued = false;
     if (!pendingReprompt) return;
     const text = pendingReprompt;
@@ -149,9 +153,9 @@ export default function (pi: ExtensionAPI) {
     hopState = stepHop(hopState, { type: "sent", kind: "abortPrompt" }).state;
   });
 
-  // Register a tool so the agent can call it programmatically.
-  // The tool queues the /clearthen command as a follow-up message;
-  // pi handles the session switch and prompt delivery.
+  // Register a tool so the agent can call it programmatically. The tool sends
+  // the /clearthen command through pi, which runs the slash-command handler
+  // at once; the handler parks at waitForIdle and clears when the turn ends.
   pi.registerTool({
     name: "clearthen",
     label: "Clear Then",

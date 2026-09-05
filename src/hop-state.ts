@@ -11,9 +11,10 @@
  * boundary sits below the session's baseline context and a hop cannot help;
  * belowBaseline tells the caller to warn and disarm instead of steering.
  *
- * A turn that ends while a queued message is pending never counts toward the
- * budget: the agent's clear is a queued follow-up that dispatches only when
- * the run ends, and an abort would discard it.
+ * A turn that ends while a clear is pending never counts toward the budget:
+ * the agent's clearthen tool call starts the command handler at once, which
+ * parks until the run is idle, and an abort here would let it resume while
+ * the re-prompt is being sent, interleaving the two.
  */
 
 export type HopAction = "none" | "steer" | "abortPrompt" | "giveUp" | "belowBaseline";
