@@ -4,10 +4,21 @@
   "description": "Clear context and run a prompt in a fresh session",
   "main": "src/index.ts",
   "type": "module",
-  "keywords": ["pi-package"],
-  "files": ["src", "README.md", "CHANGELOG.md"],
+  "keywords": [
+    "pi-package"
+  ],
+  "files": [
+    "src",
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --test src/*.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.69.0"
