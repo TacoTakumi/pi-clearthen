@@ -18,6 +18,7 @@ test("steer names the path, frontmatter values, incremented hop and the command"
   assert.match(text, /turn_budget: 3/);
   assert.match(text, /hop: 3/);
   assert.ok(text.includes("/clearthen docs/x/handoff.md"));
+  assert.match(text, /call the clearthen tool with the prompt "docs\/x\/handoff\.md"/);
 });
 
 test("a doc without hop instructs hop 1", () => {
@@ -55,6 +56,7 @@ test("preamble names the boundary, the doc path, the steer and the command", () 
   assert.ok(text.includes("docs/x/handoff.md"));
   assert.match(text, /handoff steer/);
   assert.ok(text.includes("/clearthen docs/x/handoff.md"));
+  assert.match(text, /call the clearthen tool with the prompt "docs\/x\/handoff\.md"/);
   assert.match(text, /3 turns/);
   assert.match(text, /Do not run \/clearthen again/);
 });

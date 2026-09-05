@@ -66,9 +66,11 @@ export function buildSteer(input: SteerInput): string {
     "",
     `Sections 1 and 2 are fixed. Sections 3, 4 and 5 are yours to rewrite each hop.`,
     "",
-    `When the file is saved, run exactly this command and nothing else:`,
+    `When the file is saved, call the clearthen tool with the prompt "${path}" and nothing else. That runs this command:`,
     "",
     `/clearthen ${path}`,
+    "",
+    "Do not print the command as text; only the tool call clears the context.",
   );
 
   return lines.join("\n");
@@ -89,7 +91,7 @@ export function buildPreamble(input: PreambleInput): string {
   return [
     "# Self-clearing handoff mode",
     "",
-    `This session is armed with a context boundary of ${contextLimit} tokens. When usage reaches it, a handoff steer will arrive as a user message. Obey it immediately: it tells you to write the rolling handoff document at ${path} and then run /clearthen ${path}, which clears context and continues the work in a fresh session that reads that document.`,
+    `This session is armed with a context boundary of ${contextLimit} tokens. When usage reaches it, a handoff steer will arrive as a user message. Obey it immediately: it tells you to write the rolling handoff document at ${path} and then call the clearthen tool with the prompt "${path}" (the command /clearthen ${path}), which clears the context in place and continues the work from that document. Printing the command as text does nothing; use the tool.`,
     "",
     "Work so that a handoff is cheap at any moment:",
     "- Break the goal into small, verifiable steps and finish one before starting the next.",
