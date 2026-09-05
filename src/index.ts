@@ -18,7 +18,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseFrontmatter, SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ReadonlySessionManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { parseArgs } from "./args.ts";
 import {
@@ -43,14 +43,11 @@ export interface ArmState {
   firstHop: boolean;
 }
 
-// Module-level so it survives the replacement session: pi caches the extension
-// module for the same cwd and re-runs only the factory.
+// The clear navigates the session tree in place, so this extension instance
+// persists across hops and owns the mode state directly.
 let armed: ArmState | null = null;
 // Per-hop watch state; re-created whenever the mode arms and dropped on disarm.
 let hopState: HopState | null = null;
-// True only between our handler deciding to arm and the replacement session's
-// session_start, so that start is distinguished from a plain /new.
-let handoffPending = false;
 // Steer text to resend as a plain prompt once the aborted run has settled.
 let pendingReprompt: string | null = null;
 
@@ -67,6 +64,23 @@ function setArmed(state: ArmState | null): void {
   armed = state;
   hopState = state ? initialHopState(state.contextLimit, state.turnBudget) : null;
   pendingReprompt = null;
+}
+
+/**
+ * The root user message of the current branch. Navigating the tree to it
+ * resets the leaf to an empty conversation while keeping the old branch in
+ * the same session file. Null when the conversation has no user message yet.
+ */
+function rootUserMessageId(sm: Pick<ReadonlySessionManager, "getLeafId" | "getEntry">): string | null {
+  let id = sm.getLeafId();
+  let root: string | null = null;
+  while (id) {
+    const entry = sm.getEntry(id);
+    if (!entry) break;
+    if (entry.type === "message" && entry.message.role === "user") root = entry.id;
+    id = entry.parentId;
+  }
+  return root;
 }
 
 function compactionReserveTokens(cwd: string): number {
@@ -163,12 +177,10 @@ function loadCommand(
 }
 
 export default function (pi: ExtensionAPI) {
-  // Re-apply the footer in the replacement session; any other new or resumed
-  // session (for example /new) disarms.
+  // A different conversation (/new, /resume, /fork) disarms; reload and startup
+  // keep the state and re-apply the footer.
   pi.on("session_start", async (event, ctx) => {
-    if (handoffPending) {
-      handoffPending = false;
-    } else if (event.reason === "new" || event.reason === "resume" || event.reason === "fork") {
+    if (event.reason === "new" || event.reason === "resume" || event.reason === "fork") {
       setArmed(null);
     }
     ctx.ui.setStatus("clearthen", footerText(armed, hopState));
@@ -289,32 +301,34 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
+      // Wait for any in-progress work to settle so its tool results are on the
+      // branch we are about to leave.
+      await ctx.waitForIdle();
+
+      // Clear in place: the root user message becomes the target, which makes
+      // the leaf an empty conversation in the same session file. The old hop
+      // stays as a sibling branch under /tree.
+      const root = rootUserMessageId(ctx.sessionManager);
+      if (root) {
+        const result = await ctx.navigateTree(root, { summarize: false });
+        if (result.cancelled) {
+          ctx.ui.notify("clearthen: clear cancelled by another extension; nothing sent", "warning");
+          return;
+        }
+        // pi puts the root prompt back in the editor on navigation.
+        ctx.ui.setEditorText("");
+      }
+
       // Plain use disarms; an armed load replaces whatever was armed before
       // and starts a fresh hop.
       setArmed(arm);
-      handoffPending = true;
-
-      // Wait for any in-progress work to settle before switching sessions
-      await ctx.waitForIdle();
-
-      const parentSession = ctx.sessionManager.getSessionFile();
-
-      const result = await ctx.newSession({
-        parentSession,
-        withSession: async (replacementCtx) => {
-          for (const warning of warnings) replacementCtx.ui.notify(warning, "warning");
-          replacementCtx.ui.notify(
-            arm ? `Context cleared. Handoff armed at ${arm.contextLimit} tokens.` : "Context cleared. Running prompt...",
-            "info",
-          );
-          await replacementCtx.sendUserMessage(prompt);
-        },
-      });
-      handoffPending = false;
-
-      if (result?.cancelled) {
-        ctx.ui.notify("New session cancelled", "info");
-      }
+      ctx.ui.setStatus("clearthen", footerText(armed, hopState));
+      for (const warning of warnings) ctx.ui.notify(warning, "warning");
+      ctx.ui.notify(
+        arm ? `Context cleared. Handoff armed at ${arm.contextLimit} tokens.` : "Context cleared. Running prompt...",
+        "info",
+      );
+      pi.sendUserMessage(prompt);
     },
   });
 }
