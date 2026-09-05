@@ -10,12 +10,16 @@
  * If the very first turn of a hop is already at or past the boundary, the
  * boundary sits below the session's baseline context and a hop cannot help;
  * belowBaseline tells the caller to warn and disarm instead of steering.
+ *
+ * A turn that ends while a queued message is pending never counts toward the
+ * budget: the agent's clear is a queued follow-up that dispatches only when
+ * the run ends, and an abort would discard it.
  */
 
 export type HopAction = "none" | "steer" | "abortPrompt" | "giveUp" | "belowBaseline";
 
 export type HopEvent =
-  | { type: "turnEnd"; tokens: number | null }
+  | { type: "turnEnd"; tokens: number | null; pending?: boolean }
   | { type: "sent"; kind: "steer" | "abortPrompt" }
   | { type: "cleared" };
 
@@ -54,6 +58,8 @@ export function stepHop(state: HopState, event: HopEvent): { state: HopState; ac
         if (firstTurn) return { state: { ...state, gaveUp: true }, action: "belowBaseline" };
         return { state: { ...state, fired: true, turnsSinceInstruction: 0 }, action: "steer" };
       }
+
+      if (event.pending) return { state, action: "none" };
 
       const turns = state.turnsSinceInstruction + 1;
       if (turns < state.turnBudget) {

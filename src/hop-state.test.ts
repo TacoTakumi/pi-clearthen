@@ -64,6 +64,24 @@ test("null usage after the steer still counts toward the turn budget", () => {
   assert.deepEqual(actions, ["none", "steer", "none", "none", "abortPrompt"]);
 });
 
+test("turns with a queued message pending do not count toward the budget", () => {
+  const pending: HopEvent = { type: "turnEnd", tokens: LIMIT, pending: true };
+  const { actions, state } = run([warm, turnEnd(LIMIT), pending, pending, pending, pending, pending]);
+  assert.deepEqual(actions, ["none", "steer", "none", "none", "none", "none", "none"]);
+  assert.equal(state.turnsSinceInstruction, 0);
+  assert.equal(state.escalations, 0);
+});
+
+test("pending turns interleave with counted ones without resetting the count", () => {
+  const pending: HopEvent = { type: "turnEnd", tokens: LIMIT, pending: true };
+  const { actions } = run([warm, turnEnd(LIMIT), turnEnd(LIMIT), pending, turnEnd(LIMIT), pending, turnEnd(LIMIT)]);
+  assert.deepEqual(actions, ["none", "steer", "none", "none", "none", "none", "abortPrompt"]);
+});
+
+test("a pending first turn past the limit is still below baseline", () => {
+  assert.equal(run([{ type: "turnEnd", tokens: LIMIT, pending: true }]).actions[0], "belowBaseline");
+});
+
 test("sent resets the turn counter", () => {
   const { actions } = run([
     warm,

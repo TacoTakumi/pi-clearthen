@@ -50,6 +50,10 @@ export interface ArmState {
 let armed: ArmState | null = null;
 // Per-hop watch state; re-created whenever the mode arms and dropped on disarm.
 let hopState: HopState | null = null;
+// True from the clearthen tool queuing its command until the handler runs (or
+// the run settles): those turns must not count toward the budget, since an
+// abort would discard the queued command.
+let clearQueued = false;
 // Steer text to resend as a plain prompt once the aborted run has settled.
 let pendingReprompt: string | null = null;
 
@@ -66,6 +70,7 @@ function setArmed(state: ArmState | null): void {
   armed = state;
   hopState = state ? initialHopState(state.contextLimit, state.turnBudget) : null;
   pendingReprompt = null;
+  clearQueued = false;
 }
 
 /**
@@ -200,7 +205,8 @@ export default function (pi: ExtensionAPI) {
   pi.on("turn_end", async (_event, ctx) => {
     if (!armed || !hopState) return;
     const tokens = ctx.getContextUsage()?.tokens ?? null;
-    const step = stepHop(hopState, { type: "turnEnd", tokens });
+    const pending = clearQueued || ctx.hasPendingMessages();
+    const step = stepHop(hopState, { type: "turnEnd", tokens, pending });
     hopState = step.state;
     if (step.action === "steer") {
       pi.sendUserMessage(buildSteer(armed), { deliverAs: "steer" });
@@ -232,6 +238,9 @@ export default function (pi: ExtensionAPI) {
   // Fallback ladder, second half: the aborted run has settled, so the identical
   // instruction now goes out as a normal prompt.
   pi.on("agent_settled", async () => {
+    // A queued clear dispatches as the run ends; if we are still here, either
+    // the handler already reset this or the dispatch did not happen.
+    clearQueued = false;
     if (!pendingReprompt) return;
     const text = pendingReprompt;
     pendingReprompt = null;
@@ -263,6 +272,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       pi.sendUserMessage(`/clearthen ${params.prompt}`, { deliverAs: "followUp", expandPromptTemplates: true });
+      clearQueued = true;
       return {
         content: [
           {
