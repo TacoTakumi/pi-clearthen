@@ -18,23 +18,16 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { parseFrontmatter, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { parseArgs } from "./args.ts";
-import {
-  DEFAULT_RESERVE_TOKENS,
-  DEFAULT_TURN_BUDGET,
-  exceedsHeadroom,
-  interpretConfig,
-  type ClearthenConfig,
-} from "./config.ts";
+import { DEFAULT_RESERVE_TOKENS, exceedsHeadroom } from "./config.ts";
 import { initialHopState, stepHop, type HopState } from "./hop-state.ts";
+import { DEFAULT_HANDOFF_PATH, loadCommand } from "./load.ts";
 import { ARM_ENTRY_TYPE, restoreArmState, rootUserMessageId, type ArmState } from "./session-state.ts";
 import { buildPreamble, buildSteer } from "./steer.ts";
 
-export const DEFAULT_HANDOFF_PATH = "docs/clearthen-handoff.md";
+export { DEFAULT_HANDOFF_PATH, loadCommand } from "./load.ts";
 export type { ArmState } from "./session-state.ts";
 
 // The clear navigates the session tree in place, so this extension instance
@@ -76,91 +69,6 @@ function compactionReserveTokens(cwd: string): number {
   } catch {
     return DEFAULT_RESERVE_TOKENS;
   }
-}
-
-interface LoadedCommand {
-  prompt: string;
-  arm: ArmState | null;
-  warnings: string[];
-  /** Set when the command must not proceed; the handler shows it and stops. */
-  refusal?: string;
-}
-
-function loadCommand(
-  args: string,
-  cwd: string,
-  contextWindow: number,
-  readFile: (path: string) => string = (p) => readFileSync(p, "utf8"),
-  exists: (path: string) => boolean = existsSync,
-): LoadedCommand | null {
-  const parsed = parseArgs(args, (p) => exists(resolve(cwd, p)));
-  if (parsed.kind === "empty") return null;
-
-  const warnings: string[] = [];
-  let prompt: string;
-  let path = DEFAULT_HANDOFF_PATH;
-  let firstHop = true;
-  let config: ClearthenConfig = { contextLimit: null, turnBudget: DEFAULT_TURN_BUDGET, hop: 0 };
-
-  if (parsed.kind === "path") {
-    path = parsed.path;
-    firstHop = false;
-    let frontmatter: unknown = {};
-    let body = "";
-    try {
-      ({ frontmatter, body } = parseFrontmatter(readFile(resolve(cwd, parsed.path))));
-    } catch (err) {
-      warnings.push(`clearthen: could not parse frontmatter in ${parsed.path}: ${(err as Error).message}`);
-      body = readFile(resolve(cwd, parsed.path));
-    }
-    prompt = body.trim();
-    const result = interpretConfig(frontmatter, contextWindow);
-    if (result.ok) {
-      config = result.config;
-    } else {
-      warnings.push(`clearthen: ${result.error}; mode not armed from ${parsed.path}`);
-    }
-  } else {
-    prompt = parsed.prompt;
-  }
-
-  if (parsed.boundary !== undefined) {
-    if (parsed.boundary >= contextWindow) {
-      warnings.push(
-        `clearthen: boundary ${parsed.boundary} must be below the model's context window ${contextWindow}; mode not armed`,
-      );
-      config = { ...config, contextLimit: null };
-    } else {
-      config = { ...config, contextLimit: parsed.boundary };
-    }
-  }
-
-  const arm: ArmState | null =
-    config.contextLimit === null
-      ? null
-      : {
-          path,
-          contextLimit: config.contextLimit,
-          turnBudget: config.turnBudget,
-          hop: config.hop,
-          goalPrompt: prompt,
-          firstHop,
-        };
-
-  // A new run must not overwrite a previous run's rolling doc. Resuming it is
-  // the path form; starting over means the user moves the file first.
-  if (arm && parsed.kind === "prompt" && exists(resolve(cwd, DEFAULT_HANDOFF_PATH))) {
-    return {
-      prompt,
-      arm: null,
-      warnings,
-      refusal:
-        `clearthen: ${DEFAULT_HANDOFF_PATH} already exists from a previous run. ` +
-        `Resume it with /clearthen ${parsed.boundary} ${DEFAULT_HANDOFF_PATH}, or move the file to start a new run.`,
-    };
-  }
-
-  return { prompt, arm, warnings };
 }
 
 export default function (pi: ExtensionAPI) {
@@ -290,7 +198,11 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("clearthen: a clear is already in flight; this one is ignored", "warning");
         return;
       }
-      const loaded = loadCommand(args, ctx.cwd, ctx.model.contextWindow);
+      const loaded = loadCommand(args, ctx.cwd, ctx.model.contextWindow, {
+        readFile: (p) => readFileSync(p, "utf8"),
+        exists: existsSync,
+        parseFrontmatter,
+      });
       if (!loaded) {
         ctx.ui.notify("Usage: /clearthen [<tokens>] <prompt | path.md>", "warning");
         return;
@@ -356,4 +268,3 @@ export default function (pi: ExtensionAPI) {
   });
 }
 
-export { loadCommand };
