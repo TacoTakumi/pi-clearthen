@@ -28,6 +28,8 @@ import {
   interpretConfig,
   type ClearthenConfig,
 } from "./config.ts";
+import { initialHopState, stepHop, type HopState } from "./hop-state.ts";
+import { buildSteer } from "./steer.ts";
 
 export const DEFAULT_HANDOFF_PATH = "docs/clearthen-handoff.md";
 
@@ -44,6 +46,8 @@ export interface ArmState {
 // Module-level so it survives the replacement session: pi caches the extension
 // module for the same cwd and re-runs only the factory.
 let armed: ArmState | null = null;
+// Per-hop watch state; re-created whenever the mode arms and dropped on disarm.
+let hopState: HopState | null = null;
 // True only between our handler deciding to arm and the replacement session's
 // session_start, so that start is distinguished from a plain /new.
 let handoffPending = false;
@@ -52,8 +56,14 @@ export function getArmState(): ArmState | null {
   return armed;
 }
 
-function footerText(state: ArmState | null): string | undefined {
-  return state ? `clearthen armed ${state.contextLimit}` : undefined;
+function footerText(state: ArmState | null, hop: HopState | null): string | undefined {
+  if (!state) return undefined;
+  return hop?.fired ? "clearthen handoff..." : `clearthen armed ${state.contextLimit}`;
+}
+
+function setArmed(state: ArmState | null): void {
+  armed = state;
+  hopState = state ? initialHopState(state.contextLimit, state.turnBudget) : null;
 }
 
 function compactionReserveTokens(cwd: string): number {
@@ -141,9 +151,23 @@ export default function (pi: ExtensionAPI) {
     if (handoffPending) {
       handoffPending = false;
     } else if (event.reason === "new" || event.reason === "resume" || event.reason === "fork") {
-      armed = null;
+      setArmed(null);
     }
-    ctx.ui.setStatus("clearthen", footerText(armed));
+    ctx.ui.setStatus("clearthen", footerText(armed, hopState));
+  });
+
+  // Boundary watch: once per hop, when usage is known and at or past the
+  // boundary, steer the agent to write the handoff doc and clear.
+  pi.on("turn_end", async (_event, ctx) => {
+    if (!armed || !hopState) return;
+    const tokens = ctx.getContextUsage()?.tokens ?? null;
+    const step = stepHop(hopState, { type: "turnEnd", tokens });
+    hopState = step.state;
+    if (step.action === "steer") {
+      pi.sendUserMessage(buildSteer(armed), { deliverAs: "steer" });
+      hopState = stepHop(hopState, { type: "sent", kind: "steer" }).state;
+      ctx.ui.setStatus("clearthen", footerText(armed, hopState));
+    }
   });
 
   // Register a tool so the agent can call it programmatically.
@@ -205,8 +229,9 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      // Plain use disarms; an armed load replaces whatever was armed before.
-      armed = arm;
+      // Plain use disarms; an armed load replaces whatever was armed before
+      // and starts a fresh hop.
+      setArmed(arm);
       handoffPending = true;
 
       // Wait for any in-progress work to settle before switching sessions
