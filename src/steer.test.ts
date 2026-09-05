@@ -46,3 +46,15 @@ test("later hop says do not change the fixed sections and omits the goal", () =>
   assert.ok(!text.includes("build the login flow"));
   assert.ok(!text.includes("Original brief"));
 });
+
+import { buildPreamble } from "./steer.ts";
+
+test("preamble names the boundary, the doc path, the steer and the command", () => {
+  const text = buildPreamble({ path: "docs/x/handoff.md", contextLimit: 40000, turnBudget: 3 });
+  assert.match(text, /40000 tokens/);
+  assert.ok(text.includes("docs/x/handoff.md"));
+  assert.match(text, /handoff steer/);
+  assert.ok(text.includes("/clearthen docs/x/handoff.md"));
+  assert.match(text, /3 turns/);
+  assert.match(text, /Do not run \/clearthen again/);
+});

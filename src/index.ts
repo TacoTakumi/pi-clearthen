@@ -29,7 +29,7 @@ import {
   type ClearthenConfig,
 } from "./config.ts";
 import { initialHopState, stepHop, type HopState } from "./hop-state.ts";
-import { buildSteer } from "./steer.ts";
+import { buildPreamble, buildSteer } from "./steer.ts";
 
 export const DEFAULT_HANDOFF_PATH = "docs/clearthen-handoff.md";
 
@@ -157,6 +157,13 @@ export default function (pi: ExtensionAPI) {
       setArmed(null);
     }
     ctx.ui.setStatus("clearthen", footerText(armed, hopState));
+  });
+
+  // Tell the agent about the regime from its first turn, not only at the steer.
+  pi.on("before_agent_start", async (event) => {
+    if (!armed) return;
+    const block = buildPreamble({ path: armed.path, contextLimit: armed.contextLimit, turnBudget: armed.turnBudget });
+    return { systemPrompt: `${event.systemPrompt}\n\n${block}` };
   });
 
   // Boundary watch: once per hop, when usage is known and at or past the

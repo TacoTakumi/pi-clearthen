@@ -73,3 +73,29 @@ export function buildSteer(input: SteerInput): string {
 
   return lines.join("\n");
 }
+
+export interface PreambleInput {
+  path: string;
+  contextLimit: number;
+  turnBudget: number;
+}
+
+/**
+ * System prompt block for an armed session, so the agent knows the handoff
+ * regime from its first turn rather than only when the steer arrives.
+ */
+export function buildPreamble(input: PreambleInput): string {
+  const { path, contextLimit, turnBudget } = input;
+  return [
+    "# Self-clearing handoff mode",
+    "",
+    `This session is armed with a context boundary of ${contextLimit} tokens. When usage reaches it, a handoff steer will arrive as a user message. Obey it immediately: it tells you to write the rolling handoff document at ${path} and then run /clearthen ${path}, which clears context and continues the work in a fresh session that reads that document.`,
+    "",
+    "Work so that a handoff is cheap at any moment:",
+    "- Break the goal into small, verifiable steps and finish one before starting the next.",
+    "- Keep a running picture of what is done, how it was verified, and what comes next; the handoff document has sections for exactly those (State, Next steps, Gotchas).",
+    "- Prefer tools and commands whose output is short. Do not read large files into context without need.",
+    `- After the steer arrives you have ${turnBudget} turns to write the document and run the command before the run is interrupted and re-prompted.`,
+    "- Once the goal is met, say so and stop. Do not run /clearthen again.",
+  ].join("\n");
+}
