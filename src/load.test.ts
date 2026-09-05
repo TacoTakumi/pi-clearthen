@@ -53,3 +53,28 @@ test("the prompt form is always a first hop at the default path", () => {
   assert.equal(out?.arm?.firstHop, true);
   assert.equal(out?.arm?.path, DEFAULT_HANDOFF_PATH);
 });
+
+test("an integer prefix does not arm a doc with invalid frontmatter", () => {
+  const d = deps({ "h.md": { frontmatter: { clearthen: { context_limit: 120000 }, hop: "two" }, body: "body" } });
+  const out = loadCommand("100000 h.md", CWD, WINDOW, d);
+  assert.equal(out?.arm, null);
+  assert.equal(out?.prompt, "body");
+  assert.ok(out?.warnings.some((w) => w.includes("mode not armed")));
+  assert.ok(out?.warnings.some((w) => w.includes("boundary 100000 ignored")));
+});
+
+test("an integer prefix does not arm a doc whose frontmatter fails to parse", () => {
+  const d = deps({ "h.md": { body: "---\nbad: [\n---\nbody", throws: true } });
+  const out = loadCommand("100000 h.md", CWD, WINDOW, d);
+  assert.equal(out?.arm, null);
+  assert.ok(out?.warnings.some((w) => w.includes("could not parse frontmatter")));
+  assert.ok(out?.warnings.some((w) => w.includes("boundary 100000 ignored")));
+});
+
+test("an integer prefix overrides a valid doc's context_limit", () => {
+  const d = deps({ "h.md": { frontmatter: { clearthen: { context_limit: 120000, turn_budget: 2 }, hop: 3 }, body: "body" } });
+  const out = loadCommand("90000 h.md", CWD, WINDOW, d);
+  assert.equal(out?.arm?.contextLimit, 90000);
+  assert.equal(out?.arm?.turnBudget, 2);
+  assert.equal(out?.arm?.hop, 3);
+});

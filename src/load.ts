@@ -40,6 +40,10 @@ export function loadCommand(
   let path = DEFAULT_HANDOFF_PATH;
   let firstHop = true;
   let config: ClearthenConfig = { contextLimit: null, turnBudget: DEFAULT_TURN_BUDGET, hop: 0 };
+  // A doc whose frontmatter cannot be parsed or interpreted never arms, even
+  // with an integer prefix: arming with defaults would silently reset the
+  // hop counter and turn budget of a rolling doc.
+  let docInvalid = false;
 
   if (parsed.kind === "path") {
     path = parsed.path;
@@ -48,8 +52,9 @@ export function loadCommand(
     try {
       ({ frontmatter, body } = parseFrontmatter(readFile(resolve(cwd, parsed.path))));
     } catch (err) {
-      warnings.push(`clearthen: could not parse frontmatter in ${parsed.path}: ${(err as Error).message}`);
+      warnings.push(`clearthen: could not parse frontmatter in ${parsed.path}: ${(err as Error).message}; mode not armed`);
       body = readFile(resolve(cwd, parsed.path));
+      docInvalid = true;
     }
     prompt = body.trim();
     const result = interpretConfig(frontmatter, contextWindow);
@@ -57,6 +62,7 @@ export function loadCommand(
       config = result.config;
     } else {
       warnings.push(`clearthen: ${result.error}; mode not armed from ${parsed.path}`);
+      docInvalid = true;
     }
     // A doc that has never been through a hop (no clearthen block, hop 0) is
     // a plain brief: the steer must create the Goal and Standing instructions
@@ -67,7 +73,9 @@ export function loadCommand(
     prompt = parsed.prompt;
   }
 
-  if (parsed.boundary !== undefined) {
+  if (parsed.boundary !== undefined && docInvalid) {
+    warnings.push(`clearthen: boundary ${parsed.boundary} ignored until the frontmatter in ${path} is fixed`);
+  } else if (parsed.boundary !== undefined) {
     if (parsed.boundary >= contextWindow) {
       warnings.push(
         `clearthen: boundary ${parsed.boundary} must be below the model's context window ${contextWindow}; mode not armed`,
