@@ -198,41 +198,42 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("clearthen: a clear is already in flight; this one is ignored", "warning");
         return;
       }
-      const loaded = loadCommand(args, ctx.cwd, ctx.model.contextWindow, {
-        readFile: (p) => readFileSync(p, "utf8"),
-        exists: existsSync,
-        parseFrontmatter,
-      });
-      if (!loaded) {
-        ctx.ui.notify("Usage: /clearthen [<tokens>] <prompt | path.md>", "warning");
-        return;
-      }
-      if (loaded.refusal) {
-        ctx.ui.notify(loaded.refusal, "warning");
-        return;
-      }
-      if (!loaded.prompt) {
-        ctx.ui.notify("clearthen: the document has no body to send as the prompt", "warning");
-        return;
-      }
-      const { prompt, arm, warnings } = loaded;
-      if (arm) {
-        const reserve = compactionReserveTokens(ctx.cwd);
-        if (exceedsHeadroom(arm.contextLimit, ctx.model.contextWindow, reserve)) {
-          warnings.push(
-            `clearthen: boundary ${arm.contextLimit} is inside the compaction reserve ` +
-              `(${reserve} of ${ctx.model.contextWindow} tokens); pi will compact before the boundary is reached`,
-          );
-        }
-      }
-
-      // Nothing above awaited, so the flag is set before any other invocation
-      // can pass the check at the top.
+      // The flag is set before the first await so no other invocation can
+      // pass the check at the top while this one is parked.
       clearInFlight = true;
       try {
         // Wait for any in-progress work to settle so its tool results are on
-        // the branch we are about to leave.
+        // the branch we are about to leave, and so a document the agent wrote
+        // during this run is what gets loaded.
         await ctx.waitForIdle();
+
+        const loaded = loadCommand(args, ctx.cwd, ctx.model.contextWindow, {
+          readFile: (p) => readFileSync(p, "utf8"),
+          exists: existsSync,
+          parseFrontmatter,
+        });
+        if (!loaded) {
+          ctx.ui.notify("Usage: /clearthen [<tokens>] <prompt | path.md>", "warning");
+          return;
+        }
+        if (loaded.refusal) {
+          ctx.ui.notify(loaded.refusal, "warning");
+          return;
+        }
+        if (!loaded.prompt) {
+          ctx.ui.notify("clearthen: the document has no body to send as the prompt", "warning");
+          return;
+        }
+        const { prompt, arm, warnings } = loaded;
+        if (arm) {
+          const reserve = compactionReserveTokens(ctx.cwd);
+          if (exceedsHeadroom(arm.contextLimit, ctx.model.contextWindow, reserve)) {
+            warnings.push(
+              `clearthen: boundary ${arm.contextLimit} is inside the compaction reserve ` +
+                `(${reserve} of ${ctx.model.contextWindow} tokens); pi will compact before the boundary is reached`,
+            );
+          }
+        }
 
         // Clear in place: the root user message becomes the target, which makes
         // the leaf an empty conversation in the same session file. The old hop
