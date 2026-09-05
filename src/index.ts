@@ -182,6 +182,15 @@ export default function (pi: ExtensionAPI) {
       // task of a fresh turn.
       pendingReprompt = buildSteer(armed);
       ctx.abort();
+    } else if (step.action === "belowBaseline") {
+      const limit = armed.contextLimit;
+      setArmed(null);
+      ctx.ui.setStatus("clearthen", undefined);
+      ctx.ui.notify(
+        `clearthen: boundary ${limit} is below this session's starting context (${tokens} tokens after the first turn); ` +
+          "a handoff cannot help, so the mode is disarmed. Re-arm with a higher boundary.",
+        "warning",
+      );
     } else if (step.action === "giveUp") {
       ctx.ui.notify(
         "clearthen: the agent ignored the handoff instruction after one steer and two re-prompts; " +

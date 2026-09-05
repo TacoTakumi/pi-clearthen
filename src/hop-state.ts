@@ -6,9 +6,13 @@
  * turnBudget turns to clear; if it does not, we abort and re-prompt with the
  * same instruction, at most twice; after the second failure we give up once
  * and stay quiet. A clear resets everything for the next hop.
+ *
+ * If the very first turn of a hop is already at or past the boundary, the
+ * boundary sits below the session's baseline context and a hop cannot help;
+ * belowBaseline tells the caller to warn and disarm instead of steering.
  */
 
-export type HopAction = "none" | "steer" | "abortPrompt" | "giveUp";
+export type HopAction = "none" | "steer" | "abortPrompt" | "giveUp" | "belowBaseline";
 
 export type HopEvent =
   | { type: "turnEnd"; tokens: number | null }
@@ -19,6 +23,7 @@ export interface HopState {
   limit: number;
   turnBudget: number;
   fired: boolean;
+  turnsSeen: number;
   turnsSinceInstruction: number;
   escalations: number;
   gaveUp: boolean;
@@ -27,7 +32,7 @@ export interface HopState {
 export const MAX_ESCALATIONS = 2;
 
 export function initialHopState(limit: number, turnBudget: number): HopState {
-  return { limit, turnBudget, fired: false, turnsSinceInstruction: 0, escalations: 0, gaveUp: false };
+  return { limit, turnBudget, fired: false, turnsSeen: 0, turnsSinceInstruction: 0, escalations: 0, gaveUp: false };
 }
 
 export function stepHop(state: HopState, event: HopEvent): { state: HopState; action: HopAction } {
@@ -41,8 +46,12 @@ export function stepHop(state: HopState, event: HopEvent): { state: HopState; ac
     case "turnEnd": {
       if (state.gaveUp) return { state, action: "none" };
 
+      const firstTurn = state.turnsSeen === 0;
+      state = { ...state, turnsSeen: state.turnsSeen + 1 };
+
       if (!state.fired) {
         if (event.tokens === null || event.tokens < state.limit) return { state, action: "none" };
+        if (firstTurn) return { state: { ...state, gaveUp: true }, action: "belowBaseline" };
         return { state: { ...state, fired: true, turnsSinceInstruction: 0 }, action: "steer" };
       }
 

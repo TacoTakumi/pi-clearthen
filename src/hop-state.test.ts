@@ -17,6 +17,8 @@ function run(events: HopEvent[], start: HopState = initialHopState(LIMIT, BUDGET
 }
 
 const turnEnd = (tokens: number | null): HopEvent => ({ type: "turnEnd", tokens });
+// A normal hop: the first turn lands below the boundary.
+const warm = turnEnd(1000);
 const repeat = (event: HopEvent, n: number): HopEvent[] => Array.from({ length: n }, () => event);
 
 test("below the boundary nothing happens", () => {
@@ -32,26 +34,39 @@ test("null usage never fires and the latch stays clear", () => {
 });
 
 test("crossing the boundary steers exactly once even when held there", () => {
-  const { actions } = run([turnEnd(LIMIT), turnEnd(LIMIT + 5)]);
-  assert.deepEqual(actions, ["steer", "none"]);
+  const { actions } = run([warm, turnEnd(LIMIT), turnEnd(LIMIT + 5)]);
+  assert.deepEqual(actions, ["none", "steer", "none"]);
 });
 
 test("boundary at exactly the limit fires", () => {
-  assert.equal(stepHop(initialHopState(LIMIT, BUDGET), turnEnd(LIMIT)).action, "steer");
+  const { actions } = run([warm, turnEnd(LIMIT)]);
+  assert.equal(actions[1], "steer");
+});
+
+test("first turn already at or past the limit is belowBaseline, not a steer", () => {
+  const { state, actions } = run([turnEnd(LIMIT), turnEnd(LIMIT + 100), turnEnd(LIMIT + 200)]);
+  assert.deepEqual(actions, ["belowBaseline", "none", "none"]);
+  assert.equal(state.fired, false);
+});
+
+test("a null first turn does not count as below baseline", () => {
+  const { actions } = run([turnEnd(null), turnEnd(LIMIT)]);
+  assert.deepEqual(actions, ["none", "steer"]);
 });
 
 test("abortPrompt after turnBudget turn ends since the steer", () => {
-  const { actions } = run([turnEnd(LIMIT), ...repeat(turnEnd(LIMIT), BUDGET)]);
-  assert.deepEqual(actions, ["steer", "none", "none", "abortPrompt"]);
+  const { actions } = run([warm, turnEnd(LIMIT), ...repeat(turnEnd(LIMIT), BUDGET)]);
+  assert.deepEqual(actions, ["none", "steer", "none", "none", "abortPrompt"]);
 });
 
 test("null usage after the steer still counts toward the turn budget", () => {
-  const { actions } = run([turnEnd(LIMIT), ...repeat(turnEnd(null), BUDGET)]);
-  assert.deepEqual(actions, ["steer", "none", "none", "abortPrompt"]);
+  const { actions } = run([warm, turnEnd(LIMIT), ...repeat(turnEnd(null), BUDGET)]);
+  assert.deepEqual(actions, ["none", "steer", "none", "none", "abortPrompt"]);
 });
 
 test("sent resets the turn counter", () => {
   const { actions } = run([
+    warm,
     turnEnd(LIMIT),
     turnEnd(LIMIT),
     turnEnd(LIMIT),
@@ -60,11 +75,11 @@ test("sent resets the turn counter", () => {
     turnEnd(LIMIT),
     turnEnd(LIMIT),
   ]);
-  assert.deepEqual(actions, ["steer", "none", "none", "none", "none", "none", "abortPrompt"]);
+  assert.deepEqual(actions, ["none", "steer", "none", "none", "none", "none", "none", "abortPrompt"]);
 });
 
 test("full non-compliance: one steer, two abortPrompts, one giveUp, then silence", () => {
-  const { actions, state } = run([turnEnd(LIMIT), ...repeat(turnEnd(LIMIT), BUDGET * 3 + 4)]);
+  const { actions, state } = run([warm, turnEnd(LIMIT), ...repeat(turnEnd(LIMIT), BUDGET * 3 + 4)]);
   assert.deepEqual(
     actions.filter((a) => a !== "none"),
     ["steer", "abortPrompt", "abortPrompt", "giveUp"],
@@ -75,7 +90,7 @@ test("full non-compliance: one steer, two abortPrompts, one giveUp, then silence
 });
 
 test("cleared resets to the initial armed state so the next hop can fire again", () => {
-  const spent = run([turnEnd(LIMIT), ...repeat(turnEnd(LIMIT), BUDGET * 3 + 1)]).state;
+  const spent = run([warm, turnEnd(LIMIT), ...repeat(turnEnd(LIMIT), BUDGET * 3 + 1)]).state;
   assert.equal(spent.gaveUp, true);
   const { state, actions } = run([{ type: "cleared" }, turnEnd(LIMIT - 1), turnEnd(LIMIT)], spent);
   assert.deepEqual(actions, ["none", "none", "steer"]);
@@ -86,6 +101,6 @@ test("cleared resets to the initial armed state so the next hop can fire again",
 });
 
 test("cleared mid-hop discards the fired latch", () => {
-  const { state } = run([turnEnd(LIMIT), { type: "cleared" }]);
+  const { state } = run([warm, turnEnd(LIMIT), { type: "cleared" }]);
   assert.deepEqual(state, initialHopState(LIMIT, BUDGET));
 });
