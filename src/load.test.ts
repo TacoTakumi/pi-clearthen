@@ -78,3 +78,38 @@ test("an integer prefix overrides a valid doc's context_limit", () => {
   assert.equal(out?.arm?.turnBudget, 2);
   assert.equal(out?.arm?.hop, 3);
 });
+
+test("the prompt form refuses to arm when the default handoff doc exists", () => {
+  const d = deps({ [DEFAULT_HANDOFF_PATH]: { frontmatter: { clearthen: { context_limit: 120000 }, hop: 1 }, body: "## Goal" } });
+  const out = loadCommand("150000 build X", CWD, WINDOW, d);
+  assert.equal(out?.arm, null);
+  assert.equal(out?.prompt, "build X");
+  assert.ok(out?.refusal?.includes(DEFAULT_HANDOFF_PATH));
+  assert.ok(out?.refusal?.includes(`/clearthen 150000 ${DEFAULT_HANDOFF_PATH}`));
+});
+
+test("the path form is exempt from the existing-doc refusal", () => {
+  const d = deps({ [DEFAULT_HANDOFF_PATH]: { frontmatter: { clearthen: { context_limit: 120000 }, hop: 1 }, body: "## Goal" } });
+  const out = loadCommand(`150000 ${DEFAULT_HANDOFF_PATH}`, CWD, WINDOW, d);
+  assert.equal(out?.refusal, undefined);
+  assert.equal(out?.arm?.contextLimit, 150000);
+  assert.equal(out?.arm?.hop, 1);
+});
+
+test("a plain prompt without a boundary does not arm and is not refused", () => {
+  const d = deps({ [DEFAULT_HANDOFF_PATH]: { body: "x" } });
+  const out = loadCommand("build X", CWD, WINDOW, d);
+  assert.equal(out?.arm, null);
+  assert.equal(out?.refusal, undefined);
+});
+
+test("a prefix boundary at or above the context window warns and does not arm", () => {
+  const out = loadCommand(`${WINDOW} build X`, CWD, WINDOW, deps({}));
+  assert.equal(out?.arm, null);
+  assert.equal(out?.prompt, "build X");
+  assert.ok(out?.warnings.some((w) => w.includes("must be below the model's context window")));
+});
+
+test("empty arguments return null", () => {
+  assert.equal(loadCommand("   ", CWD, WINDOW, deps({})), null);
+});

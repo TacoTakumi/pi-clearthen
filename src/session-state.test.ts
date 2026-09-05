@@ -82,3 +82,11 @@ test("clearTarget is empty with no user message", () => {
   const model = entry({ type: "model_change", parentId: null });
   assert.deepEqual(clearTarget(manager([model], model.id)), { kind: "empty" });
 });
+
+test("rootUserMessageId walks through a compaction entry", () => {
+  const u1 = entry({ type: "message", parentId: null, message: { role: "user", content: "a" } });
+  const a1 = entry({ type: "message", parentId: u1.id, message: { role: "assistant", content: "b" } });
+  const comp = entry({ type: "compaction", parentId: a1.id, summary: "s" });
+  const u2 = entry({ type: "message", parentId: comp.id, message: { role: "user", content: "c" } });
+  assert.equal(rootUserMessageId(manager([u1, a1, comp, u2], u2.id)), u1.id);
+});

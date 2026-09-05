@@ -122,3 +122,10 @@ test("cleared mid-hop discards the fired latch", () => {
   const { state } = run([warm, turnEnd(LIMIT), { type: "cleared" }]);
   assert.deepEqual(state, initialHopState(LIMIT, BUDGET));
 });
+
+test("no abort or give-up is ever produced before the steer has fired", () => {
+  const { actions, state } = run(repeat(turnEnd(LIMIT - 1), 12));
+  assert.ok(actions.every((a) => a === "none"));
+  assert.equal(state.fired, false);
+  assert.equal(state.escalations, 0);
+});
