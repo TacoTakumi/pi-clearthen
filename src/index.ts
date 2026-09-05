@@ -136,7 +136,7 @@ export default function (pi: ExtensionAPI) {
       }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      pi.sendUserMessage(`/clearthen ${params.prompt}`, { deliverAs: "followUp" });
+      pi.sendUserMessage(`/clearthen ${params.prompt}`, { deliverAs: "followUp", expandPromptTemplates: true });
       return {
         content: [
           {
