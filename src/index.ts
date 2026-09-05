@@ -51,6 +51,8 @@ let hopState: HopState | null = null;
 // True only between our handler deciding to arm and the replacement session's
 // session_start, so that start is distinguished from a plain /new.
 let handoffPending = false;
+// Steer text to resend as a plain prompt once the aborted run has settled.
+let pendingReprompt: string | null = null;
 
 export function getArmState(): ArmState | null {
   return armed;
@@ -64,6 +66,7 @@ function footerText(state: ArmState | null, hop: HopState | null): string | unde
 function setArmed(state: ArmState | null): void {
   armed = state;
   hopState = state ? initialHopState(state.contextLimit, state.turnBudget) : null;
+  pendingReprompt = null;
 }
 
 function compactionReserveTokens(cwd: string): number {
@@ -167,7 +170,29 @@ export default function (pi: ExtensionAPI) {
       pi.sendUserMessage(buildSteer(armed), { deliverAs: "steer" });
       hopState = stepHop(hopState, { type: "sent", kind: "steer" }).state;
       ctx.ui.setStatus("clearthen", footerText(armed, hopState));
+    } else if (step.action === "abortPrompt") {
+      // Stop the run; agent_settled resends the same instruction as the sole
+      // task of a fresh turn.
+      pendingReprompt = buildSteer(armed);
+      ctx.abort();
+    } else if (step.action === "giveUp") {
+      ctx.ui.notify(
+        "clearthen: the agent ignored the handoff instruction after one steer and two re-prompts; " +
+          `no further instructions will be sent. Hand off yourself with /clearthen ${armed.path}`,
+        "warning",
+      );
     }
+  });
+
+  // Fallback ladder, second half: the aborted run has settled, so the identical
+  // instruction now goes out as a normal prompt.
+  pi.on("agent_settled", async () => {
+    if (!pendingReprompt) return;
+    const text = pendingReprompt;
+    pendingReprompt = null;
+    if (!armed || !hopState) return;
+    pi.sendUserMessage(text);
+    hopState = stepHop(hopState, { type: "sent", kind: "abortPrompt" }).state;
   });
 
   // Register a tool so the agent can call it programmatically.
