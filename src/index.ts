@@ -20,7 +20,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseFrontmatter, SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { ExtensionAPI, ReadonlySessionManager } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { parseArgs } from "./args.ts";
 import {
@@ -31,22 +31,16 @@ import {
   type ClearthenConfig,
 } from "./config.ts";
 import { initialHopState, stepHop, type HopState } from "./hop-state.ts";
+import { ARM_ENTRY_TYPE, restoreArmState, rootUserMessageId, type ArmState } from "./session-state.ts";
 import { buildPreamble, buildSteer } from "./steer.ts";
 
 export const DEFAULT_HANDOFF_PATH = "docs/clearthen-handoff.md";
-
-/** Everything the next session needs to watch its boundary and write the steer. */
-export interface ArmState {
-  path: string;
-  contextLimit: number;
-  turnBudget: number;
-  hop: number;
-  goalPrompt: string;
-  firstHop: boolean;
-}
+export type { ArmState } from "./session-state.ts";
 
 // The clear navigates the session tree in place, so this extension instance
-// persists across hops and owns the mode state directly.
+// owns the mode state directly while it lives. pi re-imports the module on
+// /reload, so the state is also recorded on the session branch (see
+// session-state.ts) and rebuilt in session_start.
 let armed: ArmState | null = null;
 // Per-hop watch state; re-created whenever the mode arms and dropped on disarm.
 let hopState: HopState | null = null;
@@ -71,23 +65,6 @@ function setArmed(state: ArmState | null): void {
   hopState = state ? initialHopState(state.contextLimit, state.turnBudget) : null;
   pendingReprompt = null;
   clearQueued = false;
-}
-
-/**
- * The root user message of the current branch. Navigating the tree to it
- * resets the leaf to an empty conversation while keeping the old branch in
- * the same session file. Null when the conversation has no user message yet.
- */
-function rootUserMessageId(sm: Pick<ReadonlySessionManager, "getLeafId" | "getEntry">): string | null {
-  let id = sm.getLeafId();
-  let root: string | null = null;
-  while (id) {
-    const entry = sm.getEntry(id);
-    if (!entry) break;
-    if (entry.type === "message" && entry.message.role === "user") root = entry.id;
-    id = entry.parentId;
-  }
-  return root;
 }
 
 function compactionReserveTokens(cwd: string): number {
@@ -184,11 +161,19 @@ function loadCommand(
 }
 
 export default function (pi: ExtensionAPI) {
-  // A different conversation (/new, /resume, /fork) disarms; reload and startup
-  // keep the state and re-apply the footer.
+  // The branch decides the mode: startup, reload and resume rebuild it from
+  // the latest arm entry on the current branch (a fresh or different session
+  // has none, so it disarms). /new and /fork always disarm.
   pi.on("session_start", async (event, ctx) => {
-    if (event.reason === "new" || event.reason === "resume" || event.reason === "fork") {
+    if (event.reason === "new" || event.reason === "fork") {
       setArmed(null);
+    } else {
+      const restored = restoreArmState(ctx.sessionManager.getBranch());
+      setArmed(restored.arm);
+      // The steer latch is not persisted: a reload mid-handoff steers once
+      // more at the next turn past the boundary. Turns already taken do
+      // carry over so the below-baseline guard cannot misfire.
+      if (hopState) hopState = { ...hopState, turnsSeen: restored.turnsSeen };
     }
     ctx.ui.setStatus("clearthen", footerText(armed, hopState));
   });
@@ -220,6 +205,8 @@ export default function (pi: ExtensionAPI) {
     } else if (step.action === "belowBaseline") {
       const limit = armed.contextLimit;
       setArmed(null);
+      // Recorded so a reload does not re-arm from the earlier arm entry.
+      pi.appendEntry(ARM_ENTRY_TYPE, null);
       ctx.ui.setStatus("clearthen", undefined);
       ctx.ui.notify(
         `clearthen: boundary ${limit} is below this session's starting context (${tokens} tokens after the first turn); ` +
@@ -334,6 +321,9 @@ export default function (pi: ExtensionAPI) {
       // Plain use disarms; an armed load replaces whatever was armed before
       // and starts a fresh hop.
       setArmed(arm);
+      // Recorded on the branch before the prompt so a re-imported module can
+      // rebuild the mode from the session file.
+      pi.appendEntry(ARM_ENTRY_TYPE, arm);
       ctx.ui.setStatus("clearthen", footerText(armed, hopState));
       for (const warning of warnings) ctx.ui.notify(warning, "warning");
       ctx.ui.notify(
