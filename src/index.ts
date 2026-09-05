@@ -50,6 +50,9 @@ let hopState: HopState | null = null;
 let clearQueued = false;
 // Steer text to resend as a plain prompt once the aborted run has settled.
 let pendingReprompt: string | null = null;
+// True while a command handler is parked at waitForIdle or navigating: a
+// second invocation in that window would clear and prompt twice.
+let clearInFlight = false;
 
 export function getArmState(): ArmState | null {
   return armed;
@@ -190,7 +193,9 @@ export default function (pi: ExtensionAPI) {
   pi.on("turn_end", async (_event, ctx) => {
     if (!armed || !hopState) return;
     const tokens = ctx.getContextUsage()?.tokens ?? null;
-    const pending = clearQueued || ctx.hasPendingMessages();
+    // A parked handler counts as pending too: an abort here would let it
+    // resume while agent_settled sends the re-prompt, interleaving the two.
+    const pending = clearQueued || clearInFlight || ctx.hasPendingMessages();
     const step = stepHop(hopState, { type: "turnEnd", tokens, pending });
     hopState = step.state;
     if (step.action === "steer") {
@@ -258,6 +263,11 @@ export default function (pi: ExtensionAPI) {
       }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      if (clearInFlight) {
+        return {
+          content: [{ type: "text", text: "A clear is already in flight; it runs when this turn ends. Do not call clearthen again." }],
+        };
+      }
       pi.sendUserMessage(`/clearthen ${params.prompt}`, { deliverAs: "followUp", expandPromptTemplates: true });
       clearQueued = true;
       return {
@@ -276,6 +286,10 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("clearthen", {
     description: "Clear context and run a prompt; prefix a token boundary or pass a handoff .md to arm",
     handler: async (args, ctx) => {
+      if (clearInFlight) {
+        ctx.ui.notify("clearthen: a clear is already in flight; this one is ignored", "warning");
+        return;
+      }
       const loaded = loadCommand(args, ctx.cwd, ctx.model.contextWindow);
       if (!loaded) {
         ctx.ui.notify("Usage: /clearthen [<tokens>] <prompt | path.md>", "warning");
@@ -300,37 +314,44 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      // Wait for any in-progress work to settle so its tool results are on the
-      // branch we are about to leave.
-      await ctx.waitForIdle();
+      // Nothing above awaited, so the flag is set before any other invocation
+      // can pass the check at the top.
+      clearInFlight = true;
+      try {
+        // Wait for any in-progress work to settle so its tool results are on
+        // the branch we are about to leave.
+        await ctx.waitForIdle();
 
-      // Clear in place: the root user message becomes the target, which makes
-      // the leaf an empty conversation in the same session file. The old hop
-      // stays as a sibling branch under /tree.
-      const root = rootUserMessageId(ctx.sessionManager);
-      if (root) {
-        const result = await ctx.navigateTree(root, { summarize: false });
-        if (result.cancelled) {
-          ctx.ui.notify("clearthen: clear cancelled by another extension; nothing sent", "warning");
-          return;
+        // Clear in place: the root user message becomes the target, which makes
+        // the leaf an empty conversation in the same session file. The old hop
+        // stays as a sibling branch under /tree.
+        const root = rootUserMessageId(ctx.sessionManager);
+        if (root) {
+          const result = await ctx.navigateTree(root, { summarize: false });
+          if (result.cancelled) {
+            ctx.ui.notify("clearthen: clear cancelled by another extension; nothing sent", "warning");
+            return;
+          }
+          // pi puts the root prompt back in the editor on navigation.
+          ctx.ui.setEditorText("");
         }
-        // pi puts the root prompt back in the editor on navigation.
-        ctx.ui.setEditorText("");
-      }
 
-      // Plain use disarms; an armed load replaces whatever was armed before
-      // and starts a fresh hop.
-      setArmed(arm);
-      // Recorded on the branch before the prompt so a re-imported module can
-      // rebuild the mode from the session file.
-      pi.appendEntry(ARM_ENTRY_TYPE, arm);
-      ctx.ui.setStatus("clearthen", footerText(armed, hopState));
-      for (const warning of warnings) ctx.ui.notify(warning, "warning");
-      ctx.ui.notify(
-        arm ? `Context cleared. Handoff armed at ${arm.contextLimit} tokens.` : "Context cleared. Running prompt...",
-        "info",
-      );
-      pi.sendUserMessage(prompt);
+        // Plain use disarms; an armed load replaces whatever was armed before
+        // and starts a fresh hop.
+        setArmed(arm);
+        // Recorded on the branch before the prompt so a re-imported module can
+        // rebuild the mode from the session file.
+        pi.appendEntry(ARM_ENTRY_TYPE, arm);
+        ctx.ui.setStatus("clearthen", footerText(armed, hopState));
+        for (const warning of warnings) ctx.ui.notify(warning, "warning");
+        ctx.ui.notify(
+          arm ? `Context cleared. Handoff armed at ${arm.contextLimit} tokens.` : "Context cleared. Running prompt...",
+          "info",
+        );
+        pi.sendUserMessage(prompt);
+      } finally {
+        clearInFlight = false;
+      }
     },
   });
 }
