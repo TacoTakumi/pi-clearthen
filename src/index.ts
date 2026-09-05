@@ -81,6 +81,8 @@ interface LoadedCommand {
   prompt: string;
   arm: ArmState | null;
   warnings: string[];
+  /** Set when the command must not proceed; the handler shows it and stops. */
+  refusal?: string;
 }
 
 function loadCommand(
@@ -143,6 +145,19 @@ function loadCommand(
           goalPrompt: prompt,
           firstHop,
         };
+
+  // A new run must not overwrite a previous run's rolling doc. Resuming it is
+  // the path form; starting over means the user moves the file first.
+  if (arm && parsed.kind === "prompt" && exists(resolve(cwd, DEFAULT_HANDOFF_PATH))) {
+    return {
+      prompt,
+      arm: null,
+      warnings,
+      refusal:
+        `clearthen: ${DEFAULT_HANDOFF_PATH} already exists from a previous run. ` +
+        `Resume it with /clearthen ${parsed.boundary} ${DEFAULT_HANDOFF_PATH}, or move the file to start a new run.`,
+    };
+  }
 
   return { prompt, arm, warnings };
 }
@@ -253,6 +268,10 @@ export default function (pi: ExtensionAPI) {
       const loaded = loadCommand(args, ctx.cwd, ctx.model.contextWindow);
       if (!loaded) {
         ctx.ui.notify("Usage: /clearthen [<tokens>] <prompt | path.md>", "warning");
+        return;
+      }
+      if (loaded.refusal) {
+        ctx.ui.notify(loaded.refusal, "warning");
         return;
       }
       if (!loaded.prompt) {
