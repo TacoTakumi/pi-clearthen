@@ -4,7 +4,7 @@ All notable changes to pi-clearthen are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0]
 
 ### Added
 
@@ -21,7 +21,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - README: document the prompt-file and context-boundary forms, the handoff
   frontmatter, and the in-place clear.
 
-## [0.1.0] - 2026-07-19
+## [0.1.0]
 
 ### Added
 
