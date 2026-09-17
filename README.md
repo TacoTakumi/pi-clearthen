@@ -157,14 +157,15 @@ pi install ./path/to/pi-clearthen
 | `/handoff` | AI-summarizes context, sets draft in editor | Yes | Yes |
 | `/clearthen` | Clears context, runs prompt immediately | No | No |
 
-## Works with specflo
+## If you like this, try specflo
 
-clearthen was built for [specflo](https://github.com/TacoTakumi/specflo), a spec-driven
-brainstorm -> spec -> plan -> execute pipeline for coding agents. At each phase
-boundary specflo writes its artifacts to disk and emits a self-contained handoff
-prompt for the next phase, but by design it never clears context itself.
+clearthen is a standalone extension and needs nothing else. If you like working
+in a series of clean sessions, try [specflo](https://github.com/TacoTakumi/specflo),
+a spec-driven brainstorm -> spec -> plan -> execute pipeline for coding agents.
 
-clearthen is that trigger. In specflo's auto (unattended) mode, the agent calls
-clearthen to clear context at each phase boundary and continue the run with
-specflo's handoff payload as the prompt, so a whole project advances phase by
-phase across a series of clean sessions.
+specflo gives you auto-continue checkpoints. At each phase boundary it writes
+its artifacts to disk and emits a self-contained handoff prompt for the next
+phase. In its auto (unattended) mode, the agent calls clearthen at each
+checkpoint to clear context and continue with that prompt, so a whole project
+advances phase by phase without you, and every phase starts with a clean
+context.
