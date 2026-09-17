@@ -11,19 +11,21 @@
  *   /clearthen docs/handoff.md
  *   /clearthen 150000 implement the login flow
  *   /clearthen 120000 docs/handoff.md
+ *   /clearthen --new 150000 implement the login flow
  *
  * A leading positive integer arms the self-clearing handoff mode with that
  * absolute token boundary. A .md path loads the document: its body is the
  * prompt and its frontmatter configures the mode.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
+import { resolve } from "node:path";
 import { parseFrontmatter, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFAULT_RESERVE_TOKENS, exceedsHeadroom } from "./config.ts";
 import { initialHopState, stepHop, type HopState } from "./hop-state.ts";
-import { DEFAULT_HANDOFF_PATH, loadCommand } from "./load.ts";
+import { archivePath, DEFAULT_HANDOFF_PATH, loadCommand, staleRefusal } from "./load.ts";
 import { ARM_ENTRY_TYPE, clearTarget, restoreArmState, type ArmState } from "./session-state.ts";
 import { buildPreamble, buildSteer } from "./steer.ts";
 
@@ -196,7 +198,7 @@ export default function (pi: ExtensionAPI) {
 
   // Slash command for human use
   pi.registerCommand("clearthen", {
-    description: "Clear context and run a prompt; prefix a token boundary or pass a handoff .md to arm",
+    description: "Clear context and run a prompt; prefix a token boundary or pass a handoff .md to arm; --new archives an old handoff doc",
     handler: async (args, ctx) => {
       if (clearInFlight) {
         ctx.ui.notify("clearthen: a clear is already in flight; this one is ignored", "warning");
@@ -211,24 +213,49 @@ export default function (pi: ExtensionAPI) {
         // during this run is what gets loaded.
         await ctx.waitForIdle();
 
-        const loaded = loadCommand(args, ctx.cwd, ctx.model.contextWindow, {
-          readFile: (p) => readFileSync(p, "utf8"),
-          exists: existsSync,
-          parseFrontmatter,
-        });
+        const deps = { readFile: (p: string) => readFileSync(p, "utf8"), exists: existsSync, parseFrontmatter };
+        let loaded = loadCommand(args, ctx.cwd, ctx.model.contextWindow, deps);
         if (!loaded) {
-          ctx.ui.notify("Usage: /clearthen [<tokens>] <prompt | path.md>", "warning");
+          ctx.ui.notify("Usage: /clearthen [--new] [<tokens>] <prompt | path.md>", "warning");
           return;
         }
-        if (loaded.refusal) {
-          ctx.ui.notify(loaded.refusal, "warning");
-          return;
+        // A previous run's rolling doc is in the way. --new archives it; with
+        // a UI the user picks; without either the command refuses, so an
+        // unattended caller never drops a run by accident.
+        let archiveStale = false;
+        if (loaded.stale) {
+          const { stale } = loaded;
+          if (stale.fresh) {
+            archiveStale = true;
+          } else if (ctx.hasUI) {
+            const RESUME = "Resume the previous run";
+            const ARCHIVE = "Archive it and start the new run";
+            const CANCEL = "Cancel";
+            const choice = await ctx.ui.select(`${DEFAULT_HANDOFF_PATH} exists from a previous run`, [RESUME, ARCHIVE, CANCEL]);
+            if (choice === RESUME) {
+              loaded = loadCommand(stale.resumeArgs, ctx.cwd, ctx.model.contextWindow, deps);
+              if (!loaded) return;
+            } else if (choice === ARCHIVE) {
+              archiveStale = true;
+            } else {
+              ctx.ui.notify("clearthen: cancelled; nothing was cleared", "info");
+              return;
+            }
+          } else {
+            ctx.ui.notify(staleRefusal(stale), "warning");
+            return;
+          }
         }
         if (!loaded.prompt) {
           ctx.ui.notify("clearthen: the document has no body to send as the prompt", "warning");
           return;
         }
         const { prompt, arm, warnings } = loaded;
+        if (archiveStale) {
+          const to = archivePath(new Date());
+          renameSync(resolve(ctx.cwd, DEFAULT_HANDOFF_PATH), resolve(ctx.cwd, to));
+          ctx.ui.notify(`clearthen: previous handoff doc archived as ${to}`, "info");
+        }
         if (arm) {
           const reserve = compactionReserveTokens(ctx.cwd);
           if (exceedsHeadroom(arm.contextLimit, ctx.model.contextWindow, reserve)) {

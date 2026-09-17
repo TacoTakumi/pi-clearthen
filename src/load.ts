@@ -21,8 +21,33 @@ export interface LoadedCommand {
   prompt: string;
   arm: ArmState | null;
   warnings: string[];
-  /** Set when the command must not proceed; the handler shows it and stops. */
-  refusal?: string;
+  /**
+   * Set when an armed prompt-form run finds a previous run's rolling doc. The
+   * handler asks the user, archives the doc when fresh is set, or refuses.
+   */
+  stale?: StaleDoc;
+}
+
+export interface StaleDoc {
+  /** Arguments that resume the previous run instead. */
+  resumeArgs: string;
+  /** Arguments that archive the doc and start this run. */
+  newArgs: string;
+  /** True when the command carried --new. */
+  fresh: boolean;
+}
+
+export function staleRefusal(stale: StaleDoc): string {
+  return (
+    `clearthen: ${DEFAULT_HANDOFF_PATH} already exists from a previous run. ` +
+    `Resume it with /clearthen ${stale.resumeArgs}, or archive it and start a new run with /clearthen ${stale.newArgs}`
+  );
+}
+
+/** Where a previous run's doc goes when a new run starts. */
+export function archivePath(now: Date): string {
+  const stamp = now.toISOString().replace(/\.\d+Z$/, "").replace(/[-:]/g, "").replace("T", "-");
+  return DEFAULT_HANDOFF_PATH.replace(/\.md$/, `-${stamp}.md`);
 }
 
 export function loadCommand(
@@ -99,15 +124,17 @@ export function loadCommand(
         };
 
   // A new run must not overwrite a previous run's rolling doc. Resuming it is
-  // the path form; starting over means the user moves the file first.
+  // the path form; starting over archives the file first.
   if (arm && parsed.kind === "prompt" && exists(resolve(cwd, DEFAULT_HANDOFF_PATH))) {
     return {
       prompt,
-      arm: null,
+      arm,
       warnings,
-      refusal:
-        `clearthen: ${DEFAULT_HANDOFF_PATH} already exists from a previous run. ` +
-        `Resume it with /clearthen ${parsed.boundary} ${DEFAULT_HANDOFF_PATH}, or move the file to start a new run.`,
+      stale: {
+        resumeArgs: `${parsed.boundary} ${DEFAULT_HANDOFF_PATH}`,
+        newArgs: `--new ${parsed.boundary} <prompt>`,
+        fresh: parsed.fresh === true,
+      },
     };
   }
 

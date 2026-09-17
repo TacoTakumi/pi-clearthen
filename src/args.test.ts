@@ -76,3 +76,20 @@ test("surrounding whitespace is trimmed", () => {
     boundary: 150000,
   });
 });
+
+test("--new marks a new run and is stripped from the prompt", () => {
+  assert.deepEqual(parseArgs("--new 150000 build X", none), {
+    kind: "prompt",
+    prompt: "build X",
+    boundary: 150000,
+    fresh: true,
+  });
+});
+
+test("--new alone is empty", () => {
+  assert.deepEqual(parseArgs("--new", none), { kind: "empty" });
+});
+
+test("--new inside a prompt is literal text", () => {
+  assert.deepEqual(parseArgs("explain the --new flag", none), { kind: "prompt", prompt: "explain the --new flag" });
+});
