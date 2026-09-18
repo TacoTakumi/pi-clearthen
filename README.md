@@ -142,11 +142,36 @@ last one left off.
 
 ## Installation
 
-```bash
-# From source
-pi install ./path/to/pi-clearthen
+pi-clearthen is published on npm. Install it with pi's package manager:
 
-# Or add to settings.json packages array
+```bash
+pi install npm:pi-clearthen
+```
+
+This adds `npm:pi-clearthen` to the `packages` array in
+`~/.pi/agent/settings.json` and puts the files under `~/.pi/agent/npm/`.
+Add `-l` to install for the current project only (`.pi/settings.json` and
+`.pi/npm/`), so teammates get it on their next trusted start:
+
+```bash
+pi install -l npm:pi-clearthen
+```
+
+Append `@<version>` to pin a version. Pinned entries are skipped by
+`pi update --extensions`. Remove with `pi remove npm:pi-clearthen`.
+
+You can also add the entry to settings.json by hand:
+
+```json
+{
+  "packages": ["npm:pi-clearthen"]
+}
+```
+
+To install from a local checkout instead:
+
+```bash
+pi install ./path/to/pi-clearthen
 ```
 
 ## How it differs from similar extensions
