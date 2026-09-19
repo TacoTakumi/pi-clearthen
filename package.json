@@ -2,6 +2,14 @@
   "name": "pi-clearthen",
   "version": "0.2.1",
   "description": "Clear context and run a prompt in a fresh session",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TacoTakumi/pi-clearthen.git"
+  },
+  "homepage": "https://github.com/TacoTakumi/pi-clearthen#readme",
+  "bugs": {
+    "url": "https://github.com/TacoTakumi/pi-clearthen/issues"
+  },
   "main": "src/index.ts",
   "type": "module",
   "keywords": [
