@@ -2,6 +2,7 @@
   "name": "pi-clearthen",
   "version": "0.2.1",
   "description": "Clear context and run a prompt in a fresh session",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/TacoTakumi/pi-clearthen.git"
